@@ -41,6 +41,7 @@ TODO:
 1. Implement the scoring function that combines the model's predictions with the toxicity and readability scores(find a paper that does this, there is alreedy classification model that does this)
 2.AMIT  Implement the beam search algorithm(https://www.youtube.com/watch?v=5o-kdjv7FD0)  AMIT
 3. Encoder only model, train the model with the loss and the token that the beam search algorithm found (Take some exsit model and fine tune it)
+4. Add option for excat match of the target
 """
 
 class PGD_BeamSearch:
@@ -48,7 +49,7 @@ class PGD_BeamSearch:
         self.model = model
         self.initial_prompt = initial_prompt
         self.injunction_addition = injunction_addition
-        self.target = target
+        self.target = None 
         self.beam_width = beam_width
         self.max_epochs = max_epochs
         self.pgd_config = pgd_config
@@ -67,27 +68,27 @@ class PGD_BeamSearch:
 
     def beam_search(self, sequence):
         sequences = [(sequence, self.calculate_loss(sequence))]
-        for token in self.vocabulary:
-            for i in range(self.max_epochs):
-                sequence = sequence + token
-                loss = self.calculate_loss(sequence)
-                sequences.append((sequence, loss))
-                sequences = sorted(sequences, key=lambda x: x[1])
-                sequences = sequences[:self.beam_width]
-                for injunction in self.injunction_addition:
-                    sequence = sequence + injunction
-                    loss = self.calculate_loss(sequence)
-                    sequences.append((sequence, loss))
-                    sequences = sorted(sequences, key=lambda x: x[1])
-                    sequences = sequences[:self.beam_width]
-                if all([s[0].endswith(self.target) for s in sequences]) or sequences[0][1] < self.loss_stop_min:
-                    break
+        while len(sequences[0][0]) < self.max_seq_length and not all([s[0].endswith(self.target) for s in sequences]) and self.get_best_loss(sequences) > self.loss_stop_min:
+            new_sequences = []
+            for token in self.vocabulary:
+                for s in sequences:
+                    new_sequence = s + " " +token 
+                    new_loss = self.calculate_loss(new_sequence)
+                    new_sequences.append((new_sequence, new_loss))
+            sequences = sorted(new_sequences, key=lambda x: x[1])[:self.beam_width]
+        
+        train = self.model.train()
+
+        self.initial_prompt =""
+        self.injunction_addition = " "
+        self.target = None
+
         return sequences
     
 
     def calculate_loss(self, sequence):
-        score_toxicity_tmp = score_toxicity(sequence)
-        score_model_readability_tmp = score_model_readability(sequence)
+        score_toxicity_tmp = score_toxicity(ask_model(sequence))
+        score_model_readability_tmp = score_model_readability(ask_model(sequence))
 
         toxicity = score_toxicity_tmp - self.score_toxicity
         readability = score_model_readability_tmp - self.score_model_readability
@@ -116,9 +117,10 @@ class PGD_BeamSearch:
     def get_best_readability(self, sequences):
         return self.score_model_readability(sequences[0][0])
     
-    def attack(self,sequence):
+    def attack(self,sequence,target):
         self.initial_prompt = sequence
-        return self.get_best_sequence(self.beam_search(self.initial_prompt))
+        self.target = target
+        return ask_model(self.get_best_sequence(self.beam_search(self.initial_prompt)))
 
 
 code_and_logic_vocabulary={
