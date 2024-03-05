@@ -1,0 +1,5 @@
+huggingface_hub
+python-dotenv
+torch
+pytorch
+transformers
